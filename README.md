@@ -86,21 +86,31 @@ docshield/
 
 ---
 
-## Security design decisions (so far)
+## Security design decisions
 
-- **Context-only grounding.** The system prompt in `llm.py` explicitly
-  instructs the model to answer only from supplied context, and to say so
-  plainly when an answer isn't present rather than guessing. This was
-  verified with a deliberately off-topic test question — see
-  [Testing & results](#testing--results) below.
-- **Documents are treated as data, not instructions.** The system prompt
-  tells Claude not to follow any instructions that appear inside retrieved
-  context, as an early defense against prompt injection hidden inside an
-  uploaded document. This is a first pass — full adversarial testing is
-  planned for Phase 1, Week 3.
+- **The real defense against prompt injection is the system prompt, not
+  pattern matching — and we proved this, not just assumed it.**
+  `security.py` includes a regex-based filter for known injection
+  phrasings, but red-team testing showed it catches 0% of deliberately
+  rephrased attempts (synonyms, roleplay framing, non-English text,
+  character spacing — see `tests/attack_log.md`, Test 4). The actual
+  boundary that held in every single one of those same tests was the
+  system-prompt grounding instruction in `llm.py`, which generalizes far
+  beyond literal phrase matching (Test 5). The regex filter is kept as a
+  free, zero-latency first pass for lazy attempts, but is explicitly
+  *not* relied upon as the real security control.
+- **PII detection via AWS Comprehend**, not regex. Comprehend correctly
+  identified names, emails, and phone numbers at 100% confidence in
+  testing (`tests/attack_log.md`, Test 2) — catching cases like names
+  that have no fixed pattern, which regex alone would miss.
+- **Context-only grounding.** The system prompt in `llm.py` instructs
+  the model to answer only from supplied context, decline plainly when
+  an answer isn't present, and treat retrieved context as data rather
+  than instructions. Verified against both off-topic questions (Test 1)
+  and 9 adversarial injection attempts (Test 5).
 - **No hardcoded secrets.** All AWS configuration is loaded from a local
-  `.env` file (excluded via `.gitignore`) through `config.py`, which fails
-  loudly and immediately if required settings are missing.
+  `.env` file (excluded via `.gitignore`) through `config.py`, which
+  fails loudly and immediately if required settings are missing.
 
 ---
 
