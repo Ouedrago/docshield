@@ -20,6 +20,7 @@ so read each section as its own thing.
 import re
 import boto3
 from app import config
+from app import logger
 
 
 # ============================================================
@@ -157,25 +158,18 @@ def detect_injection_attempt(text: str) -> list[str]:
     return matched_patterns
 
 
-def validate_user_input(text: str) -> tuple[bool, str]:
-    """
-    The main function the rest of the app calls before sending ANY
-    user input onward to the LLM.
-
-    Returns:
-        (is_safe, message)
-        is_safe: True if no injection patterns were found
-        message: explanation if it's NOT safe, empty string if it is
-
-    This is intentionally a "soft block" for Phase 1 - we flag and
-    can warn the user, rather than silently rewriting their input.
-    Silently altering user input can create confusing, hard-to-debug
-    behavior. Being explicit about WHY something was blocked is
-    better both for users and for your own debugging sanity.
-    """
+def validate_user_input(text: str,
+                        session_id: str = "local",
+                        doc_id: str = "unknown") -> tuple[bool, str]:
     matched = detect_injection_attempt(text)
 
     if matched:
+        logger.log_security_event(
+            session_id=session_id,
+            doc_id=doc_id,
+            event_subtype="INJECTION_ATTEMPT",
+            details={"patterns_matched": matched},
+        )
         message = (
             "Your message contains a phrase commonly associated with "
             "prompt injection attempts and has been blocked. If this "

@@ -16,6 +16,8 @@ once, when the document is first uploaded.
 
 import io
 import pickle
+import time
+from app import logger
 from pypdf import PdfReader
 import numpy as np
 import faiss
@@ -146,15 +148,10 @@ def load_index(doc_id: str) -> tuple[faiss.Index, list[str]]:
     return index, chunks
 
 
-def ingest_document(s3_key: str, doc_id: str):
-    """
-    The full pipeline, start to finish:
-    S3 -> extract text -> chunk -> embed -> FAISS index -> save to disk
+def ingest_document(s3_key: str, doc_id: str,
+                    session_id: str = "local"):
+    start = time.time()
 
-    This is the ONE function the rest of the app calls. Everything
-    above this is internal plumbing - main.py will just call
-    ingest_document() and not need to know HOW any of it works.
-    """
     print(f"Fetching {s3_key} from S3...")
     pdf_bytes = storage.read_file_bytes(s3_key)
 
@@ -173,6 +170,14 @@ def ingest_document(s3_key: str, doc_id: str):
     save_index(index, chunks, doc_id)
     print(f"Index saved as local_index/{doc_id}.faiss")
 
+    latency_ms = int((time.time() - start) * 1000)
+    logger.log_upload(
+        session_id=session_id,
+        doc_id=doc_id,
+        file_size_bytes=len(pdf_bytes),
+        chunks_created=len(chunks),
+        latency_ms=latency_ms,
+    )
     return index, chunks
 
 

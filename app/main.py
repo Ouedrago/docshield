@@ -23,7 +23,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import streamlit as st
-from app import storage, ingest, security
+from app import storage, ingest, security , logger
 from app.retriever import answer_question
 
 # -------------------------------------------------------------------
@@ -49,8 +49,8 @@ if "doc_name" not in st.session_state:
     st.session_state.doc_name = None
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-
-
+if "session_id" not in st.session_state:
+    st.session_state.session_id = logger.generate_session_id()
 # -------------------------------------------------------------------
 # SIDEBAR — document upload and status
 # -------------------------------------------------------------------

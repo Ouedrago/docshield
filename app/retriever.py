@@ -13,8 +13,11 @@ The flow:
     -> get back the N closest chunks -> return them as context
 """
 
+import time
+from app import logger
 import numpy as np
 from app import ingest, llm
+
 
 
 def retrieve_relevant_chunks(question: str, doc_id: str, top_k: int = 3) -> list[str]:
@@ -63,23 +66,22 @@ def retrieve_relevant_chunks(question: str, doc_id: str, top_k: int = 3) -> list
     return relevant_chunks
 
 
-def answer_question(question: str, doc_id: str) -> str:
-    """
-    The full RAG answer pipeline:
-    question -> retrieve relevant chunks -> ask Claude using those
-    chunks as context -> return the grounded answer.
+def answer_question(question: str, doc_id: str,
+                    session_id: str = "local") -> str:
+    start = time.time()
 
-    This is the ONE function main.py (our Streamlit UI) will actually
-    call. Everything else is internal detail it doesn't need to know.
-    """
     relevant_chunks = retrieve_relevant_chunks(question, doc_id)
-
-    # Join the chunks into one block of context text, clearly
-    # separated so Claude can tell where one chunk ends and the
-    # next begins.
     context = "\n---\n".join(relevant_chunks)
-
     answer = llm.ask_claude(question=question, context=context)
+
+    latency_ms = int((time.time() - start) * 1000)
+    logger.log_query(
+        session_id=session_id,
+        doc_id=doc_id,
+        question=question,
+        chunks_retrieved=len(relevant_chunks),
+        latency_ms=latency_ms,
+    )
     return answer
 
 
