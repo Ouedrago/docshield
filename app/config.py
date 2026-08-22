@@ -32,6 +32,9 @@ S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
 BEDROCK_EMBEDDING_MODEL = os.getenv("BEDROCK_EMBEDDING_MODEL", "amazon.titan-embed-text-v2:0")
 
+GUARDRAIL_ID = os.getenv("GUARDRAIL_ID", "2pwx8xq1k2vp")
+GUARDRAIL_VERSION = os.getenv("GUARDRAIL_VERSION", "DRAFT")
+
 # --- Model generation settings ---
 # max_tokens: the maximum length of the model's answer
 # temperature: 0 = focused/deterministic, 1 = creative/random
