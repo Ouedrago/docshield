@@ -1,0 +1,43 @@
+# .dockerignore
+# -------------
+# Files and folders excluded from the Docker build context.
+# Smaller build context = faster builds, smaller images.
+# More importantly: secrets never accidentally end up in the image.
+
+# --- SECRETS (CRITICAL - never bake these into an image) ---
+# In production, secrets come from AWS Secrets Manager or
+# ECS Task Definition environment variables - never from a file
+# baked into the image. If .env ends up in the image, anyone
+# who pulls the image can read your AWS credentials.
+.env
+*.env
+
+# --- Python ---
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# --- Local development artifacts ---
+# These are regenerated at runtime from S3/EFS in production
+local_index/
+sample_docs/
+
+# --- Git ---
+.git/
+.gitignore
+
+# --- Red-team scripts (not part of the app) ---
+redteam_*.py
+make_*.py
+
+# --- OS / editor ---
+.DS_Store
+.vscode/
+.idea/
+Thumbs.db
+
+# --- Tests (not needed in production image) ---
+tests/
