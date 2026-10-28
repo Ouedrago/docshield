@@ -7,7 +7,9 @@ Upload a document, ask questions about it, and get answers grounded strictly
 in that document's content — with PII detection, prompt injection defenses,
 and full audit logging layered in as the project matures through its phases.
 
-**Status:** Phase 1 in progress — core RAG pipeline complete and verified.
+**Status:** Phase 2 in progress — RAG pipeline, security layer, 
+CloudWatch logging, and Bedrock Guardrails complete. Container 
+built and pushed to ECR. ECS deployment in progress.
 
 ---
 
@@ -114,6 +116,41 @@ docshield/
 
 ---
 
+## Deployment
+
+DocShield is containerised and deployed on AWS ECS Fargate with the
+following stack:
+
+| Component | Service |
+|---|---|
+| Container registry | AWS ECR |
+| Container runtime | AWS ECS Fargate |
+| FAISS index persistence | AWS EFS |
+| Load balancer | AWS ALB |
+| DNS | AWS Route 53 (optional) |
+
+### Running costs (Option 1 — scale to zero when not in use)
+
+The ECS service is configured with `desired-count 0` by default.
+Scale up before a demo, scale down after:
+
+**Start DocShield:**
+```bash
+aws ecs update-service --cluster docshield-cluster \
+    --service docshield-service --desired-count 1
+```
+
+**Stop DocShield:**
+```bash
+aws ecs update-service --cluster docshield-cluster \
+    --service docshield-service --desired-count 0
+```
+
+Estimated cost when running: ~$0.024/hour (~$0.58/day).
+Estimated cost when stopped: ~$0.08/month (ECR storage only).
+
+---
+
 ## Testing & results
 
 A synthetic test document (`sample_docs/company_handbook.pdf`) was created
@@ -190,15 +227,22 @@ Claude 3 Haiku and Titan Embeddings V2, and an S3 bucket created in advance.
 ## Roadmap
 
 - [x] **Phase 1, Weeks 1–2:** Core RAG pipeline (Bedrock + S3 + FAISS)
-- [ ] **Phase 1, Week 3:** PII detection (AWS Comprehend) + prompt injection
-      red-teaming, documented in `attack_log.md`
-- [ ] **Phase 1, Week 4:** Streamlit UI, deployment to AWS Lambda + API
-      Gateway, CloudWatch logging, live URL
-- [ ] **Phase 2:** Multi-document support, per-user access control, query
-      audit trail
-- [ ] **Phase 3:** Agentic capabilities — multi-document synthesis and
-      autonomous report drafting
-
+- [x] **Phase 1, Week 3:** Security layer — PII detection, injection 
+      red-teaming, 6 documented tests in `attack_log.md`
+- [x] **Phase 1, Week 4:** Streamlit UI demoed locally, all security 
+      features verified in the interface
+- [x] **Phase 2, Step 1:** CloudWatch structured audit logging wired 
+      into every module
+- [x] **Phase 2, Step 2:** Bedrock Guardrails configured and wired in —
+      semantic injection filtering proven in Test 7
+- [x] **Phase 2, Step 3a:** Dockerfile built, container tested locally
+- [x] **Phase 2, Step 3b:** Docker image pushed to AWS ECR
+- [ ] **Phase 2, Step 3c:** EFS + ECS Fargate deployment
+- [ ] **Phase 2, Step 3d:** ALB + live URL
+- [ ] **Phase 3:** Multi-document support, per-user access control,
+      query audit trail
+- [ ] **Phase 4:** Agentic capabilities — multi-document synthesis
+      and autonomous report drafting
 ---
 
 ## License
