@@ -1,0 +1,148 @@
+{
+    "taskDefinition": {
+        "taskDefinitionArn": "arn:aws:ecs:us-east-1:396143251711:task-definition/docshield-task:1",
+        "containerDefinitions": [
+            {
+                "name": "docshield",
+                "image": "396143251711.dkr.ecr.us-east-1.amazonaws.com/docshield:latest",
+                "cpu": 0,
+                "portMappings": [
+                    {
+                        "containerPort": 8501,
+                        "hostPort": 8501,
+                        "protocol": "tcp"
+                    }
+                ],
+                "essential": true,
+                "environment": [
+                    {
+                        "name": "BEDROCK_EMBEDDING_MODEL",
+                        "value": "amazon.titan-embed-text-v2:0"
+                    },
+                    {
+                        "name": "AWS_REGION",
+                        "value": "us-east-1"
+                    },
+                    {
+                        "name": "GUARDRAIL_VERSION",
+                        "value": "DRAFT"
+                    },
+                    {
+                        "name": "BEDROCK_MODEL_ID",
+                        "value": "us.anthropic.claude-3-haiku-20240307-v1:0"
+                    }
+                ],
+                "mountPoints": [
+                    {
+                        "sourceVolume": "docshield-efs",
+                        "containerPath": "/app/local_index",
+                        "readOnly": false
+                    }
+                ],
+                "volumesFrom": [],
+                "secrets": [
+                    {
+                        "name": "S3_BUCKET_NAME",
+                        "valueFrom": "arn:aws:ssm:us-east-1:396143251711:parameter/docshield/S3_BUCKET_NAME"
+                    },
+                    {
+                        "name": "GUARDRAIL_ID",
+                        "valueFrom": "arn:aws:ssm:us-east-1:396143251711:parameter/docshield/GUARDRAIL_ID"
+                    }
+                ],
+                "logConfiguration": {
+                    "logDriver": "awslogs",
+                    "options": {
+                        "awslogs-group": "/docshield/production",
+                        "awslogs-region": "us-east-1",
+                        "awslogs-stream-prefix": "ecs"
+                    }
+                },
+                "healthCheck": {
+                    "command": [
+                        "CMD-SHELL",
+                        "curl -f http://localhost:8501/_stcore/health || exit 1"
+                    ],
+                    "interval": 30,
+                    "timeout": 10,
+                    "retries": 3,
+                    "startPeriod": 60
+                },
+                "systemControls": []
+            }
+        ],
+        "family": "docshield-task",
+        "taskRoleArn": "arn:aws:iam::396143251711:role/docshield-task-role",
+        "executionRoleArn": "arn:aws:iam::396143251711:role/docshield-task-role",
+        "networkMode": "awsvpc",
+        "revision": 1,
+        "volumes": [
+            {
+                "name": "docshield-efs",
+                "efsVolumeConfiguration": {
+                    "fileSystemId": "fs-0c1ed8a030f0a8831",
+                    "rootDirectory": "/",
+                    "transitEncryption": "ENABLED"
+                }
+            }
+        ],
+        "status": "ACTIVE",
+        "requiresAttributes": [
+            {
+                "name": "ecs.capability.execution-role-awslogs"
+            },
+            {
+                "name": "com.amazonaws.ecs.capability.ecr-auth"
+            },
+            {
+                "name": "com.amazonaws.ecs.capability.task-iam-role"
+            },
+            {
+                "name": "ecs.capability.container-health-check"
+            },
+            {
+                "name": "ecs.capability.execution-role-ecr-pull"
+            },
+            {
+                "name": "ecs.capability.secrets.ssm.environment-variables"
+            },
+            {
+                "name": "com.amazonaws.ecs.capability.docker-remote-api.1.18"
+            },
+            {
+                "name": "ecs.capability.task-eni"
+            },
+            {
+                "name": "com.amazonaws.ecs.capability.docker-remote-api.1.29"
+            },
+            {
+                "name": "com.amazonaws.ecs.capability.logging-driver.awslogs"
+            },
+            {
+                "name": "ecs.capability.efsAuth"
+            },
+            {
+                "name": "com.amazonaws.ecs.capability.docker-remote-api.1.19"
+            },
+            {
+                "name": "ecs.capability.efs"
+            },
+            {
+                "name": "com.amazonaws.ecs.capability.docker-remote-api.1.25"
+            }
+        ],
+        "placementConstraints": [],
+        "compatibilities": [
+            "EC2",
+            "MANAGED_INSTANCES",
+            "FARGATE"
+        ],
+        "requiresCompatibilities": [
+            "FARGATE"
+        ],
+        "cpu": "512",
+        "memory": "1024",
+        "registeredAt": "2026-10-29T12:00:35.790000+00:00",
+        "registeredBy": "arn:aws:iam::396143251711:user/Abdul"
+    }
+}

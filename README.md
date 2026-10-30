@@ -5,11 +5,13 @@ security as a first-class concern rather than an afterthought.
 
 Upload a document, ask questions about it, and get answers grounded strictly
 in that document's content — with PII detection, prompt injection defenses,
-and full audit logging layered in as the project matures through its phases.
+Bedrock Guardrails, and full audit logging built in from the foundation up.
 
-**Status:** Phase 2 in progress — RAG pipeline, security layer, 
-CloudWatch logging, and Bedrock Guardrails complete. Container 
-built and pushed to ECR. ECS deployment in progress.
+**Status:** Phase 2 in progress — RAG pipeline, security layer, CloudWatch
+logging, Bedrock Guardrails, and containerisation complete. ECS Fargate
+deployment in progress.
+
+**Live URL:** Coming in Phase 2, Step 3d (ALB + ECS service launch)
 
 ---
 
@@ -18,231 +20,429 @@ built and pushed to ECR. ECS deployment in progress.
 Most RAG demos stop at "it answers questions about my PDF." DocShield asks a
 harder question: *what happens when someone tries to break it?* Every phase
 of this build includes a deliberate attempt to attack what was just built,
-with findings documented in [`tests/attack_log.md`](tests/attack_log.md).
+with findings documented honestly in [`tests/attack_log.md`](tests/attack_log.md).
+
+The result is a system where the security story is evidence-based, not
+theoretical — built, broken, fixed, and documented at every step.
 
 ---
 
-## Architecture (Phase 1)
+# SECTION 1 — LOCAL DEVELOPMENT
+
+Everything in this section runs on your laptop. No cloud costs beyond
+AWS API calls (Bedrock, Comprehend, S3). This is where all development
+and testing happens before anything goes to production.
+
+---
+
+## Local architecture
 
 ```
- User (Streamlit UI)
+ Browser (localhost:8501)
         │
         ▼
- AWS API Gateway  ──▶  AWS Lambda (orchestration)
-                              │
-                ┌─────────────┼─────────────┐
-                ▼             ▼             ▼
-            AWS S3      AWS Bedrock      FAISS
-         (documents)   (Claude 3 Haiku  (vector
-                        + Titan Embed)   search)
-                              │
-                              ▼
-                        AWS CloudWatch
-                       (logs & metrics)
+ Streamlit UI (app/main.py)
+        │
+        ├──▶ app/storage.py   ──▶  AWS S3         (document storage)
+        ├──▶ app/ingest.py    ──▶  AWS Bedrock     (Titan embeddings)
+        │                    ──▶  FAISS           (local disk index)
+        ├──▶ app/retriever.py ──▶  AWS Bedrock     (Claude 3 Haiku)
+        ├──▶ app/security.py  ──▶  AWS Comprehend  (PII detection)
+        │                    ──▶  Regex filter    (injection guard)
+        ├──▶ app/llm.py       ──▶  Bedrock Guardrails (semantic filter)
+        └──▶ app/logger.py    ──▶  CloudWatch      (audit logs)
+                                  (also logs locally to terminal)
 ```
 
-**Data flow:** a document is uploaded to S3 → text is extracted and split
-into overlapping chunks → each chunk is embedded via Amazon Titan → vectors
-are stored in a local FAISS index → a user's question is embedded the same
-way → FAISS returns the most relevant chunks → those chunks (and only those)
-are passed to Claude 3 Haiku as context → Claude answers strictly from that
-context.
+**Key difference from production:**
+FAISS index is saved to `local_index/` on your local disk.
+Secrets come from a `.env` file, not SSM Parameter Store.
 
 ---
 
-## Tech stack
+## Local tech stack
 
-| Layer | Technology |
+| Component | Technology |
 |---|---|
 | LLM | AWS Bedrock — Claude 3 Haiku |
 | Embeddings | AWS Bedrock — Amazon Titan Embeddings V2 |
-| Vector search | FAISS (local, `IndexFlatL2`) |
+| Vector search | FAISS (saved to `local_index/` on disk) |
 | Document storage | AWS S3 |
-| PDF parsing | `pypdf` |
+| PII detection | AWS Comprehend |
+| Content filtering | AWS Bedrock Guardrails |
+| Audit logging | AWS CloudWatch + local terminal |
+| Secrets | `.env` file (never committed to Git) |
 | UI | Streamlit |
-| Language | Python 3 |
+| Language | Python 3.12 |
 
 ---
 
-## Project structure
+## Local project structure
 
 ```
 docshield/
 ├── app/
-│   ├── config.py       # centralized settings, loaded from .env
-│   ├── llm.py           # Bedrock chat + embedding calls
-│   ├── storage.py        # S3 upload/download
-│   ├── ingest.py         # PDF → chunks → embeddings → FAISS index
-│   ├── retriever.py     # question → relevant chunks → grounded answer
-│   └── security.py       # PII detection + prompt injection guards (Phase 1, Week 3)
+│   ├── config.py       # centralised settings, loaded from .env
+│   ├── llm.py          # Bedrock chat + embeddings + Guardrails
+│   ├── storage.py      # S3 upload/download
+│   ├── ingest.py       # PDF → chunks → embeddings → FAISS index
+│   ├── retriever.py    # question → relevant chunks → grounded answer
+│   ├── security.py     # PII detection + prompt injection guards
+│   ├── logger.py       # structured CloudWatch audit logging
+│   └── main.py         # Streamlit UI
 ├── tests/
 │   ├── test_ingest.py
 │   ├── test_security.py
-│   └── attack_log.md     # every attack attempted, what happened, what was fixed
+│   └── attack_log.md   # every attack attempted + results + findings
 ├── sample_docs/
-│   └── company_handbook.pdf   # synthetic test document with invented facts
-├── make_sample_pdf.py    # generates the sample document above
+│   └── company_handbook.pdf   # synthetic test document (invented facts)
+├── local_index/               # FAISS indexes saved here (gitignored)
+├── make_sample_pdf.py         # generates synthetic test document
+├── make_poisoned_pdf.py       # generates indirect injection test doc
+├── redteam_injection.py       # direct injection bypass tests
+├── redteam_llm_behavior.py    # LLM resistance tests
+├── redteam_indirect_injection.py  # indirect injection tests
 ├── requirements.txt
-└── README.md
+└── .env                       # secrets — never committed to Git
 ```
 
 ---
 
-## Security design decisions
-
-- **The real defense against prompt injection is the system prompt, not
-  pattern matching — and we proved this, not just assumed it.**
-  `security.py` includes a regex-based filter for known injection
-  phrasings, but red-team testing showed it catches 0% of deliberately
-  rephrased attempts (synonyms, roleplay framing, non-English text,
-  character spacing — see `tests/attack_log.md`, Test 4). The actual
-  boundary that held in every single one of those same tests was the
-  system-prompt grounding instruction in `llm.py`, which generalizes far
-  beyond literal phrase matching (Test 5). The regex filter is kept as a
-  free, zero-latency first pass for lazy attempts, but is explicitly
-  *not* relied upon as the real security control.
-- **PII detection via AWS Comprehend**, not regex. Comprehend correctly
-  identified names, emails, and phone numbers at 100% confidence in
-  testing (`tests/attack_log.md`, Test 2) — catching cases like names
-  that have no fixed pattern, which regex alone would miss.
-- **Context-only grounding.** The system prompt in `llm.py` instructs
-  the model to answer only from supplied context, decline plainly when
-  an answer isn't present, and treat retrieved context as data rather
-  than instructions. Verified against both off-topic questions (Test 1)
-  and 9 adversarial injection attempts (Test 5).
-- **No hardcoded secrets.** All AWS configuration is loaded from a local
-  `.env` file (excluded via `.gitignore`) through `config.py`, which
-  fails loudly and immediately if required settings are missing.
-
----
-
-## Deployment
-
-DocShield is containerised and deployed on AWS ECS Fargate with the
-following stack:
-
-| Component | Service |
-|---|---|
-| Container registry | AWS ECR |
-| Container runtime | AWS ECS Fargate |
-| FAISS index persistence | AWS EFS |
-| Load balancer | AWS ALB |
-| DNS | AWS Route 53 (optional) |
-
-### Running costs (Option 1 — scale to zero when not in use)
-
-The ECS service is configured with `desired-count 0` by default.
-Scale up before a demo, scale down after:
-
-**Start DocShield:**
-```bash
-aws ecs update-service --cluster docshield-cluster \
-    --service docshield-service --desired-count 1
-```
-
-**Stop DocShield:**
-```bash
-aws ecs update-service --cluster docshield-cluster \
-    --service docshield-service --desired-count 0
-```
-
-Estimated cost when running: ~$0.024/hour (~$0.58/day).
-Estimated cost when stopped: ~$0.08/month (ECR storage only).
-
----
-
-## Testing & results
-
-A synthetic test document (`sample_docs/company_handbook.pdf`) was created
-with entirely invented facts about a fictional company, specifically so
-correct answers could only come from genuine retrieval — not from anything
-Claude could plausibly know already.
-
-| Question | Result |
-|---|---|
-| "When was the company founded and who founded it?" | ✅ Correct — retrieved and answered from document |
-| "How many days of annual leave do employees get?" | ✅ Correct — retrieved and answered from document |
-| "What is the maximum expense I can claim without approval?" | ✅ Correct — retrieved and answered from document |
-| "What is the capital of France?" (deliberately off-topic) | ✅ Correctly declined: *"I cannot find that information in the document."* |
-
-The fourth test is the most important one. A RAG system that quietly
-answers off-topic questions using general knowledge looks impressive in a
-demo but is unreliable and unsafe in practice — it means there's no real
-guarantee answers come from the source document at all. DocShield held the
-boundary correctly here.
-
-Full details, including future adversarial/security testing, are logged in
-[`tests/attack_log.md`](tests/attack_log.md).
-
----
-
-## Lessons learned
-
-- **Bedrock model IDs for Claude often require a region-prefixed inference
-  profile** (e.g. `us.anthropic.claude-3-haiku-20240307-v1:0`, not just
-  `anthropic.claude-3-haiku-20240307-v1:0`) — even though AWS's error
-  message just says "invalid identifier" with no indication of why. Fixed
-  by adding the regional prefix matching `AWS_REGION`.
-- **Chunk count varies slightly by document and extraction quirks.**
-  A fixed `chunk_size` doesn't guarantee a fixed number of chunks — small
-  variations in extracted text length are normal and not a bug.
-
----
-
-## Setup & running locally
+## Running locally
 
 ```bash
-# 1. Clone and enter the project
+# 1. Clone the repository
 git clone <your-repo-url>
 cd docshield
 
-# 2. Create and activate a virtual environment
+# 2. Create and activate virtual environment
 python3 -m venv venv
-source venv/bin/activate      # Windows: venv\Scripts\activate
+source venv/Scripts/activate      # Windows Git Bash
+# or: venv\Scripts\activate       # Windows CMD/PowerShell
+# or: source venv/bin/activate    # Mac/Linux
 
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Configure AWS CLI (one-time, if not already done)
+# 4. Configure AWS CLI (one-time setup)
 aws configure
+# Enter: Access Key ID, Secret Access Key, Region (us-east-1), output (json)
 
-# 5. Create your .env file (see .env.example) with:
-#    AWS_REGION, S3_BUCKET_NAME, BEDROCK_MODEL_ID, BEDROCK_EMBEDDING_MODEL
+# 5. Create your .env file in the project root
+# Contents:
+# AWS_REGION=us-east-1
+# S3_BUCKET_NAME=your-bucket-name
+# BEDROCK_MODEL_ID=us.anthropic.claude-3-haiku-20240307-v1:0
+# BEDROCK_EMBEDDING_MODEL=amazon.titan-embed-text-v2:0
+# GUARDRAIL_ID=your-guardrail-id
+# GUARDRAIL_VERSION=DRAFT
 
-# 6. Generate the sample test document
+# 6. Generate the synthetic test document
 python make_sample_pdf.py
 
-# 7. Run the ingestion pipeline on the sample document
-python -m app.ingest
-
-# 8. Ask it questions
-python -m app.retriever
+# 7. Run the app
+python -m streamlit run app/main.py
 ```
 
-**Prerequisites:** an AWS account with Bedrock model access enabled for
-Claude 3 Haiku and Titan Embeddings V2, and an S3 bucket created in advance.
+Open `http://localhost:8501` in your browser.
+
+---
+
+## Local prerequisites
+
+| Requirement | Details |
+|---|---|
+| Python | 3.12 |
+| AWS account | With Bedrock, S3, Comprehend access |
+| Bedrock models | Claude 3 Haiku + Titan Embeddings V2 enabled |
+| S3 bucket | Created in your AWS account |
+| Bedrock Guardrail | Created in AWS console |
+| AWS CLI | Configured with valid credentials |
+
+---
+
+## Testing locally
+
+Run each module independently to verify it works:
+
+```bash
+# Test Bedrock connection + embeddings
+python -m app.llm
+
+# Test S3 upload/download
+python -m app.storage
+
+# Test full ingestion pipeline
+python -m app.ingest
+
+# Test RAG retrieval + answers
+python -m app.retriever
+
+# Test PII detection + injection guards
+python -m app.security
+
+# Test CloudWatch logging
+python -m app.logger
+```
+
+### Security red-team tests
+
+```bash
+# Test 4: direct injection bypass attempts against regex filter
+python redteam_injection.py
+
+# Test 5: same inputs against Claude's behavior directly
+python redteam_llm_behavior.py
+
+# Test 6: indirect injection via poisoned document
+python make_poisoned_pdf.py
+python redteam_indirect_injection.py
+```
+
+---
+
+## Security testing summary
+
+| Test | What was tested | Result |
+|---|---|---|
+| Test 1 | Off-topic question grounding | ✅ Correctly declined |
+| Test 2 | PII detection via Comprehend | ✅ NAME, EMAIL, PHONE at 100% confidence |
+| Test 3 | Basic injection pattern matching | ✅ Obvious attempts caught |
+| Test 4 | Adversarial rephrasing against regex | ❌ 0/9 caught by regex |
+| Test 5 | Same inputs against Claude directly | ✅ 9/9 resisted by model |
+| Test 6 | Indirect injection via poisoned document | ✅ All 3 techniques ignored |
+| Test 7 | Bedrock Guardrails semantic filtering | ✅ Caught what regex missed |
+
+Full findings in [`tests/attack_log.md`](tests/attack_log.md).
+
+---
+
+## Security architecture — defence in depth
+
+| Layer | Control | What it catches |
+|---|---|---|
+| 1 | Regex filter (`security.py`) | Obvious literal injection phrases |
+| 2 | Bedrock Guardrails (input) | Semantic injection, PII, denied topics |
+| 3 | System prompt grounding (`llm.py`) | Model-level resistance to manipulation |
+| 4 | Bedrock Guardrails (output) | Harmful content in Claude's response |
+| 5 | CloudWatch audit logging | Full event trail for every interaction |
+
+---
+
+## Lessons learned (local development)
+
+- **Bedrock model IDs require a regional prefix** — use
+  `us.anthropic.claude-3-haiku-20240307-v1:0` not
+  `anthropic.claude-3-haiku-20240307-v1:0`. AWS error message just says
+  "invalid identifier" with no hint of why.
+- **Regex injection detection catches 0% of deliberate rephrasings** —
+  the real defense is the system-prompt grounding instruction, proven
+  across Tests 1, 5, and 6. Regex is kept only as a free first-pass filter.
+- **FAISS chunk count varies by document** — a fixed `chunk_size` doesn't
+  guarantee a fixed number of chunks. Small variations are normal.
+- **Test with invented facts, not real documents** — the synthetic test
+  document uses a fictional company so correct answers can only come from
+  genuine retrieval, not Claude's training knowledge.
+
+---
+
+---
+
+# SECTION 2 — PRODUCTION DEPLOYMENT
+
+Everything in this section runs on AWS. The app is containerised, deployed
+on ECS Fargate, and scaled to zero when not in use to minimise cost.
+
+---
+
+## Production architecture
+
+```
+ Browser
+    │ HTTPS
+    ▼
+ Route 53 (DNS)
+    │
+    ▼
+ Application Load Balancer (HTTPS termination)
+    │
+    ▼
+ ┌─────────────────────────────────────────┐
+ │  VPC — Private Subnet                   │
+ │                                         │
+ │  ECS Fargate                            │
+ │  DocShield container (Python 3.12-slim) │
+ │  Pulled from ECR                        │
+ │         │                               │
+ └─────────┼───────────────────────────────┘
+           │
+           ├──▶ AWS S3          (document storage)
+           ├──▶ AWS EFS         (FAISS index — persists across restarts)
+           ├──▶ AWS Bedrock     (Claude 3 Haiku + Titan Embeddings)
+           ├──▶ AWS Comprehend  (PII detection)
+           ├──▶ Bedrock Guardrails (semantic input/output filtering)
+           ├──▶ CloudWatch      (structured audit logs)
+           └──▶ SSM Parameter Store (secrets injected at runtime)
+```
+
+**Key difference from local:**
+FAISS index is mounted from EFS — survives container restarts.
+Secrets come from SSM Parameter Store — never baked into the image.
+
+---
+
+## Production tech stack
+
+| Component | Technology |
+|---|---|
+| LLM | AWS Bedrock — Claude 3 Haiku |
+| Embeddings | AWS Bedrock — Amazon Titan Embeddings V2 |
+| Vector search | FAISS (persisted on AWS EFS) |
+| Document storage | AWS S3 |
+| PII detection | AWS Comprehend |
+| Content filtering | AWS Bedrock Guardrails |
+| Audit logging | AWS CloudWatch Logs (`/docshield/production`) |
+| Secrets | AWS SSM Parameter Store (SecureString) |
+| Container registry | AWS ECR |
+| Container runtime | AWS ECS Fargate |
+| Index persistence | AWS EFS (`fs-0c1ed8a030f0a8831`) |
+| Load balancer | AWS ALB (coming in Step 3d) |
+| DNS | AWS Route 53 (optional) |
+
+---
+
+## Production project structure
+
+```
+docshield/
+├── app/                    # same application code as local
+├── Dockerfile              # production container definition
+├── .dockerignore           # excludes secrets and dev files from image
+├── task-definition.json    # ECS Fargate task definition
+└── requirements.txt
+```
+
+---
+
+## AWS infrastructure resources
+
+| Resource | Value |
+|---|---|
+| ECR repository | `396143251711.dkr.ecr.us-east-1.amazonaws.com/docshield` |
+| ECS cluster | `docshield-cluster` (us-east-1) |
+| EFS file system | `fs-0c1ed8a030f0a8831` |
+| IAM task role | `docshield-task-role` |
+| SSM parameter — bucket | `docshield.S3_BUCKET_NAME` |
+| SSM parameter — guardrail | `docshield.GUARDRAIL_ID` |
+| CloudWatch log group | `/docshield/production` |
+| ECS task definition | `docshield-task:1` |
+
+---
+
+## Building and pushing a new image
+
+Run these whenever you make code changes and want to deploy:
+
+```bash
+# Build the image
+docker build -t docshield .
+
+# Authenticate Docker to ECR
+aws ecr get-login-password --region us-east-1 | docker login \
+    --username AWS \
+    --password-stdin 396143251711.dkr.ecr.us-east-1.amazonaws.com
+
+# Tag and push
+docker tag docshield:latest \
+    396143251711.dkr.ecr.us-east-1.amazonaws.com/docshield:latest
+docker push \
+    396143251711.dkr.ecr.us-east-1.amazonaws.com/docshield:latest
+```
+
+---
+
+## Starting and stopping the service (scale to zero)
+
+DocShield runs with `desired-count 0` by default — no charges when idle.
+
+**Start before a demo:**
+```bash
+aws ecs update-service --cluster docshield-cluster \
+    --service docshield-service --desired-count 1 --region us-east-1
+```
+
+**Stop after a demo:**
+```bash
+aws ecs update-service --cluster docshield-cluster \
+    --service docshield-service --desired-count 0 --region us-east-1
+```
+
+---
+
+## Production cost model
+
+| State | Resource | Cost |
+|---|---|---|
+| Running | ECS Fargate (0.5 vCPU, 1GB) | ~$0.024/hour |
+| Running | ALB | ~$0.008/hour |
+| Always | ECR image storage (~700MB) | ~$0.07/month |
+| Always | EFS storage (index files) | ~$0.03/month |
+| Always | SSM parameters | Free |
+| Always | CloudWatch logs | ~$0.50/month |
+| **Stopped total** | | **~$0.10/month** |
+| **Running total** | | **~$0.032/hour** |
+
+---
+
+## Production prerequisites
+
+| Requirement | Status |
+|---|---|
+| ECR repository | ✅ Created |
+| Docker image pushed | ✅ `docshield:latest` in ECR |
+| ECS cluster | ✅ `docshield-cluster` active |
+| EFS file system | ✅ `fs-0c1ed8a030f0a8831` |
+| IAM task role | ✅ `docshield-task-role` with all permissions |
+| SSM parameters | ✅ S3 bucket + Guardrail ID stored |
+| Task definition | ✅ `docshield-task:1` registered |
+| ECS service + ALB | ⏳ Coming in Phase 2 Step 3d |
+| Live URL | ⏳ Coming in Phase 2 Step 3d |
+
+---
+
+## Lessons learned (production deployment)
+
+- **Docker on Windows works best through PowerShell** — Git Bash has a
+  `more` pager conflict with AWS CLI. Fix with
+  `aws configure set cli_pager ""` or redirect output with `> output.json`.
+- **EFS is required for FAISS persistence on ECS** — Fargate containers
+  have no persistent local storage. Without EFS the FAISS index is lost
+  on every container restart, forcing re-embedding of every document.
+- **SSM Parameter Store over .env for production secrets** — `.env` files
+  must never be baked into Docker images. SSM SecureString parameters are
+  injected at runtime by ECS, keeping credentials out of the image.
+- **ECR stores images even when ECS is stopped** — storage cost continues
+  even at scale-zero. At ~$0.07/month for our image size, this is negligible.
 
 ---
 
 ## Roadmap
 
 - [x] **Phase 1, Weeks 1–2:** Core RAG pipeline (Bedrock + S3 + FAISS)
-- [x] **Phase 1, Week 3:** Security layer — PII detection, injection 
-      red-teaming, 6 documented tests in `attack_log.md`
-- [x] **Phase 1, Week 4:** Streamlit UI demoed locally, all security 
-      features verified in the interface
-- [x] **Phase 2, Step 1:** CloudWatch structured audit logging wired 
-      into every module
-- [x] **Phase 2, Step 2:** Bedrock Guardrails configured and wired in —
-      semantic injection filtering proven in Test 7
-- [x] **Phase 2, Step 3a:** Dockerfile built, container tested locally
-- [x] **Phase 2, Step 3b:** Docker image pushed to AWS ECR
-- [ ] **Phase 2, Step 3c:** EFS + ECS Fargate deployment
-- [ ] **Phase 2, Step 3d:** ALB + live URL
+- [x] **Phase 1, Week 3:** Security layer — PII detection, injection
+      red-teaming, 7 documented tests in `attack_log.md`
+- [x] **Phase 1, Week 4:** Streamlit UI demoed and verified locally
+- [x] **Phase 2, Step 1:** CloudWatch structured audit logging
+- [x] **Phase 2, Step 2:** Bedrock Guardrails — semantic filtering proven
+- [x] **Phase 2, Step 3a:** Dockerfile + container tested locally
+- [x] **Phase 2, Step 3b:** Docker image pushed to ECR
+- [x] **Phase 2, Step 3c:** ECS cluster, EFS, IAM role, SSM, task definition
+- [ ] **Phase 2, Step 3d:** ECS service + ALB + live URL
 - [ ] **Phase 3:** Multi-document support, per-user access control,
-      query audit trail
-- [ ] **Phase 4:** Agentic capabilities — multi-document synthesis
-      and autonomous report drafting
+      agentic multi-document synthesis
+- [ ] **Phase 4 (InterviewShield):** LP evaluation engine and adaptive
+      interview coaching agent
+
 ---
 
 ## License
